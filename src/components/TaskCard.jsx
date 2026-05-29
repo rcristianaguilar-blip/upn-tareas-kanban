@@ -74,7 +74,7 @@ export default function TaskCard({
 
       {task.description && (
         <p
-          className={`mt-3 line-clamp-3 text-sm leading-6 text-neutral-600 ${
+          className={`mt-3 whitespace-pre-line break-words text-sm leading-relaxed text-neutral-600 ${
             completed ? 'line-through decoration-neutral-400' : ''
           }`}
         >
