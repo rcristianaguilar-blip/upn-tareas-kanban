@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle, Paperclip, Trash2, X } from 'lucide-react';
 import {
   PRIORITIES,
   STATUSES,
+  TASK_FILE_ACCEPT,
+  formatFileSize,
   getEmptyTask,
   normalizePriority,
   normalizeStatus,
   toDateTimeLocal,
+  validateTaskFiles,
 } from '../lib/taskHelpers.js';
 
 export default function TaskForm({ initialTask, defaultStatus, saving, onClose, onSubmit }) {
@@ -27,10 +30,12 @@ export default function TaskForm({ initialTask, defaultStatus, saving, onClose, 
   }, [defaultStatus, initialTask]);
 
   const [formTask, setFormTask] = useState(startingTask);
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
     setFormTask(startingTask);
+    setSelectedFiles([]);
   }, [startingTask]);
 
   const updateField = (field, value) => {
@@ -38,6 +43,34 @@ export default function TaskForm({ initialTask, defaultStatus, saving, onClose, 
       ...current,
       [field]: value,
     }));
+  };
+
+  const handleFilesChange = (event) => {
+    const nextFiles = Array.from(event.target.files || []);
+    const validationError = validateTaskFiles(nextFiles);
+
+    if (validationError) {
+      setError(validationError);
+      event.target.value = '';
+      return;
+    }
+
+    setSelectedFiles((current) => [...current, ...nextFiles]);
+    event.target.value = '';
+    setError('');
+  };
+
+  const removeSelectedFile = (fileToRemove) => {
+    setSelectedFiles((current) =>
+      current.filter(
+        (file) =>
+          !(
+            file.name === fileToRemove.name &&
+            file.size === fileToRemove.size &&
+            file.lastModified === fileToRemove.lastModified
+          ),
+      ),
+    );
   };
 
   const handleSubmit = (event) => {
@@ -49,7 +82,10 @@ export default function TaskForm({ initialTask, defaultStatus, saving, onClose, 
     }
 
     setError('');
-    onSubmit(formTask);
+    onSubmit({
+      ...formTask,
+      files: selectedFiles,
+    });
   };
 
   return (
@@ -177,6 +213,51 @@ export default function TaskForm({ initialTask, defaultStatus, saving, onClose, 
               placeholder="Resumen breve de indicaciones, entregables o avisos importantes."
             />
           </label>
+
+          <div>
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-neutral-700">
+                Archivos adjuntos
+              </span>
+              <input
+                type="file"
+                multiple
+                accept={TASK_FILE_ACCEPT}
+                onChange={handleFilesChange}
+                className="focus-ring block w-full rounded-md border border-dashed border-neutral-300 bg-neutral-50 px-3 py-3 text-sm text-neutral-700 file:mr-3 file:rounded-md file:border-0 file:bg-upn-yellow file:px-3 file:py-2 file:text-sm file:font-black file:text-upn-black hover:border-upn-yellow"
+              />
+            </label>
+            <p className="mt-2 text-xs font-medium text-neutral-500">
+              PDF, Word, Excel, PowerPoint, imágenes o ZIP. Máximo 10 MB por archivo.
+            </p>
+
+            {selectedFiles.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {selectedFiles.map((file) => (
+                  <div
+                    key={`${file.name}-${file.size}-${file.lastModified}`}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Paperclip size={16} className="shrink-0 text-neutral-400" />
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-neutral-800">{file.name}</p>
+                        <p className="text-xs text-neutral-500">{formatFileSize(file.size)}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      title="Quitar archivo"
+                      className="focus-ring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-red-100 text-red-600 transition hover:bg-red-50"
+                      onClick={() => removeSelectedFile(file)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           <label className="flex items-center gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-3">
             <input

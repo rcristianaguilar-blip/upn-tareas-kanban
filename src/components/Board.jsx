@@ -8,6 +8,7 @@ export default function Board({
   onCreate,
   onEdit,
   onDelete,
+  onDeleteFile,
   onToggleHidden,
   onComplete,
 }) {
@@ -72,6 +73,7 @@ export default function Board({
               onCreate={onCreate}
               onEdit={onEdit}
               onDelete={onDelete}
+              onDeleteFile={onDeleteFile}
               onToggleHidden={onToggleHidden}
               onComplete={onComplete}
             />

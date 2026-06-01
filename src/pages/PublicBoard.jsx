@@ -6,10 +6,12 @@ import TaskFilters from '../components/TaskFilters.jsx';
 import TaskForm from '../components/TaskForm.jsx';
 import { isSupabaseConfigured, supabase } from '../lib/supabase.js';
 import {
+  buildTaskFilePath,
   buildTaskPayload,
   getSearchText,
   normalizePriority,
   normalizeStatus,
+  normalizeTaskFileRecord,
 } from '../lib/taskHelpers.js';
 
 const initialFilters = {
@@ -79,7 +81,43 @@ export default function PublicBoard({
       return;
     }
 
-    setTasks((data || []).sort(sortTasks));
+    const taskRows = data || [];
+    const taskIds = taskRows.map((task) => task.id).filter(Boolean);
+    let tasksWithFiles = taskRows.map((task) => ({
+      ...task,
+      files: [],
+    }));
+
+    if (taskIds.length > 0) {
+      const { data: fileRows, error: fileError } = await supabase
+        .from('task_files')
+        .select('*')
+        .in('task_id', taskIds)
+        .order('created_at', { ascending: true });
+
+      if (fileError) {
+        setError(fileError.message || 'No se pudieron cargar los archivos adjuntos.');
+      } else {
+        const filesByTask = (fileRows || []).reduce((acc, fileRow) => {
+          const file = normalizeTaskFileRecord(fileRow);
+
+          if (!file.file_url && file.file_path) {
+            const { data: publicUrlData } = supabase.storage.from('task-files').getPublicUrl(file.file_path);
+            file.file_url = publicUrlData.publicUrl;
+          }
+
+          acc[file.task_id] = [...(acc[file.task_id] || []), file];
+          return acc;
+        }, {});
+
+        tasksWithFiles = taskRows.map((task) => ({
+          ...task,
+          files: filesByTask[task.id] || [],
+        }));
+      }
+    }
+
+    setTasks(tasksWithFiles.sort(sortTasks));
     setLoading(false);
   }, [isAdmin]);
 
@@ -93,6 +131,9 @@ export default function PublicBoard({
     const channel = supabase
       .channel('tasks-board-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
+        loadTasks();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_files' }, () => {
         loadTasks();
       })
       .subscribe();
@@ -162,43 +203,91 @@ export default function PublicBoard({
     }
   };
 
+  const uploadTaskFiles = async (taskId, files = []) => {
+    for (const [index, file] of files.entries()) {
+      const filePath = buildTaskFilePath(taskId, file.name, index);
+
+      const { error: uploadError } = await supabase.storage.from('task-files').upload(filePath, file, {
+        contentType: file.type || undefined,
+      });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data: publicUrlData } = supabase.storage.from('task-files').getPublicUrl(filePath);
+
+      const { error: fileInsertError } = await supabase.from('task_files').insert({
+        task_id: taskId,
+        file_name: file.name,
+        file_path: filePath,
+        file_url: publicUrlData.publicUrl,
+        file_type: file.type || null,
+        file_size: file.size,
+      });
+
+      if (fileInsertError) {
+        await supabase.storage.from('task-files').remove([filePath]);
+        throw fileInsertError;
+      }
+    }
+  };
+
   const persistTask = async (formTask) => {
     if (!supabase || !isAdmin || !session?.user) return;
 
     setSaving(true);
     setError('');
 
-    const payload = buildTaskPayload(formTask);
-    const isDone = normalizeStatus(payload.status) === 'completado';
-    const completedAt = isDone ? formState.task?.completed_at || new Date().toISOString() : null;
+    try {
+      const payload = buildTaskPayload(formTask);
+      const files = Array.isArray(formTask.files) ? formTask.files : [];
+      const isDone = normalizeStatus(payload.status) === 'completado';
+      const completedAt = isDone ? formState.task?.completed_at || new Date().toISOString() : null;
 
-    const finalPayload = {
-      ...payload,
-      completed_at: completedAt,
-      updated_at: new Date().toISOString(),
-    };
+      const finalPayload = {
+        ...payload,
+        completed_at: completedAt,
+        updated_at: new Date().toISOString(),
+      };
 
-    const request = formState.task
-      ? supabase.from('tasks').update(finalPayload).eq('id', formState.task.id)
-      : supabase
+      let taskId = formState.task?.id;
+
+      if (formState.task) {
+        const { error: updateError } = await supabase.from('tasks').update(finalPayload).eq('id', formState.task.id);
+
+        if (updateError) {
+          throw updateError;
+        }
+      } else {
+        const { data: createdTask, error: insertError } = await supabase
           .from('tasks')
           .insert({
             ...finalPayload,
             created_by: session.user.id,
             created_at: new Date().toISOString(),
-          });
+          })
+          .select('id')
+          .single();
 
-    const { error: saveError } = await request;
+        if (insertError) {
+          throw insertError;
+        }
 
-    if (saveError) {
+        taskId = createdTask.id;
+      }
+
+      if (files.length > 0) {
+        await uploadTaskFiles(taskId, files);
+      }
+
+      setSaving(false);
+      closeForm();
+      loadTasks();
+    } catch (saveError) {
       setError(saveError.message || 'No se pudo guardar la tarea.');
       setSaving(false);
-      return;
     }
-
-    setSaving(false);
-    closeForm();
-    loadTasks();
   };
 
   const updateTask = async (task, changes) => {
@@ -238,11 +327,60 @@ export default function PublicBoard({
     });
   };
 
+  const handleDeleteFile = async (file) => {
+    if (!supabase || !isAdmin) return;
+
+    const confirmed = window.confirm(`¿Eliminar el archivo "${file.file_name}"?`);
+    if (!confirmed) return;
+
+    setError('');
+
+    if (file.file_path) {
+      const { error: storageError } = await supabase.storage.from('task-files').remove([file.file_path]);
+
+      if (storageError) {
+        setError(storageError.message || 'No se pudo eliminar el archivo del bucket.');
+        return;
+      }
+    }
+
+    const deleteQuery = supabase.from('task_files').delete();
+    const { error: deleteError } = file.id
+      ? await deleteQuery.eq('id', file.id)
+      : await deleteQuery.eq('file_path', file.file_path);
+
+    if (deleteError) {
+      setError(deleteError.message || 'No se pudo eliminar el registro del archivo.');
+      return;
+    }
+
+    loadTasks();
+  };
+
   const handleDelete = async (task) => {
     if (!supabase || !isAdmin) return;
 
     const confirmed = window.confirm(`¿Eliminar la tarea "${task.title}"? Esta acción no se puede deshacer.`);
     if (!confirmed) return;
+
+    const taskFiles = Array.isArray(task.files) ? task.files : [];
+    const filePaths = taskFiles.map((file) => file.file_path).filter(Boolean);
+
+    if (filePaths.length > 0) {
+      const { error: storageError } = await supabase.storage.from('task-files').remove(filePaths);
+
+      if (storageError) {
+        setError(storageError.message || 'No se pudieron eliminar los archivos adjuntos.');
+        return;
+      }
+
+      const { error: fileDeleteError } = await supabase.from('task_files').delete().eq('task_id', task.id);
+
+      if (fileDeleteError) {
+        setError(fileDeleteError.message || 'No se pudieron eliminar los registros de archivos.');
+        return;
+      }
+    }
 
     const { error: deleteError } = await supabase.from('tasks').delete().eq('id', task.id);
 
@@ -319,6 +457,7 @@ export default function PublicBoard({
             onCreate={openCreateForm}
             onEdit={openEditForm}
             onDelete={handleDelete}
+            onDeleteFile={handleDeleteFile}
             onToggleHidden={handleToggleHidden}
             onComplete={handleComplete}
           />

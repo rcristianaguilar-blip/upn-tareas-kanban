@@ -8,6 +8,7 @@ export default function Column({
   onCreate,
   onEdit,
   onDelete,
+  onDeleteFile,
   onToggleHidden,
   onComplete,
 }) {
@@ -43,6 +44,7 @@ export default function Column({
             isAdmin={isAdmin}
             onEdit={onEdit}
             onDelete={onDelete}
+            onDeleteFile={onDeleteFile}
             onToggleHidden={onToggleHidden}
             onComplete={onComplete}
           />

@@ -49,6 +49,53 @@ export const BOARD_COLUMNS = [
   },
 ];
 
+export const MAX_TASK_FILE_SIZE = 10 * 1024 * 1024;
+
+export const TASK_FILE_ACCEPT = [
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+  '.csv',
+  '.ppt',
+  '.pptx',
+  'image/*',
+  '.zip',
+].join(',');
+
+const allowedFileExtensions = new Set([
+  'pdf',
+  'doc',
+  'docx',
+  'xls',
+  'xlsx',
+  'csv',
+  'ppt',
+  'pptx',
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'bmp',
+  'svg',
+  'zip',
+]);
+
+const allowedMimeTypes = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/zip',
+  'application/x-zip-compressed',
+]);
+
 const statusAliases = {
   todo: 'pendiente',
   pending: 'pendiente',
@@ -88,6 +135,74 @@ const priorityAliases = {
   urgent: 'alta',
   critical: 'alta',
 };
+
+function getFileExtension(fileName) {
+  return String(fileName || '').split('.').pop()?.toLowerCase() || '';
+}
+
+export function isAllowedTaskFile(file) {
+  const mimeType = String(file?.type || '').toLowerCase();
+  const extension = getFileExtension(file?.name);
+  return mimeType.startsWith('image/') || allowedMimeTypes.has(mimeType) || allowedFileExtensions.has(extension);
+}
+
+export function validateTaskFiles(files) {
+  for (const file of files) {
+    if (file.size > MAX_TASK_FILE_SIZE) {
+      return `${file.name} supera el máximo de 10 MB.`;
+    }
+
+    if (!isAllowedTaskFile(file)) {
+      return `${file.name} no es un tipo de archivo permitido.`;
+    }
+  }
+
+  return '';
+}
+
+export function formatFileSize(bytes) {
+  if (!Number.isFinite(bytes)) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function sanitizeFileName(fileName) {
+  const cleaned = String(fileName || 'archivo')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  return cleaned || 'archivo';
+}
+
+export function buildTaskFilePath(taskId, fileName, index = 0) {
+  const safeName = sanitizeFileName(fileName);
+  const token = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${index}`;
+  return `tasks/${taskId}/${Date.now()}-${token}-${safeName}`;
+}
+
+export function normalizeTaskFileRecord(record) {
+  const filePath = record.file_path || record.path || record.storage_path || '';
+  const fileName =
+    record.file_name ||
+    record.name ||
+    record.filename ||
+    record.original_name ||
+    filePath.split('/').filter(Boolean).pop() ||
+    'Archivo';
+
+  return {
+    ...record,
+    file_name: fileName,
+    file_path: filePath,
+    file_url: record.file_url || record.public_url || record.url || '',
+    file_type: record.file_type || record.mime_type || record.type || '',
+    file_size: record.file_size ?? record.size ?? null,
+  };
+}
 
 export function normalizeStatus(status) {
   const raw = String(status || 'pendiente').trim().toLowerCase();

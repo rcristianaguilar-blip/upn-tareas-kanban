@@ -2,13 +2,16 @@ import {
   CalendarDays,
   CheckCircle2,
   Edit3,
+  ExternalLink,
   Eye,
   EyeOff,
   Link as LinkIcon,
+  Paperclip,
   Trash2,
 } from 'lucide-react';
 import CountdownTimer from './CountdownTimer.jsx';
 import {
+  formatFileSize,
   formatDate,
   getDueState,
   getPriorityMeta,
@@ -29,6 +32,7 @@ export default function TaskCard({
   isAdmin,
   onEdit,
   onDelete,
+  onDeleteFile,
   onToggleHidden,
   onComplete,
 }) {
@@ -37,6 +41,7 @@ export default function TaskCard({
   const priorityMeta = getPriorityMeta(task.priority);
   const statusMeta = getStatusMeta(task.status);
   const dueState = getDueState(task.due_at);
+  const files = Array.isArray(task.files) ? task.files : [];
 
   const urgencyClass =
     !completed && dueState.isOverdue
@@ -108,6 +113,51 @@ export default function TaskCard({
           <LinkIcon size={16} />
           <span className="truncate">Abrir enlace</span>
         </a>
+      )}
+
+      {files.length > 0 && (
+        <div className="mt-4 rounded-lg border border-neutral-200 bg-white/80 p-3">
+          <h4 className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-neutral-600">
+            <Paperclip size={15} />
+            Archivos adjuntos
+          </h4>
+          <div className="space-y-2">
+            {files.map((file) => (
+              <div
+                key={file.id || file.file_path || file.file_name}
+                className="flex items-center justify-between gap-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-upn-black">{file.file_name}</p>
+                  {file.file_size ? (
+                    <p className="text-xs text-neutral-500">{formatFileSize(file.file_size)}</p>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <a
+                    href={file.file_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="focus-ring inline-flex items-center gap-1 rounded-md bg-upn-yellow px-3 py-1.5 text-xs font-black text-upn-black transition hover:bg-upn-gold"
+                  >
+                    <ExternalLink size={14} />
+                    Abrir
+                  </a>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      title="Eliminar archivo"
+                      className="focus-ring inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-100 bg-white text-red-600 transition hover:border-red-200 hover:bg-red-50"
+                      onClick={() => onDeleteFile?.(file)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {isAdmin && (
